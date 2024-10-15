@@ -23,11 +23,20 @@ endif()
 # Install Python dependencies
 execute_process(
   COMMAND ${PIP_EXECUTABLE} install simple-pid
-  RESULT_VARIABLE pip_result
+  RESULT_VARIABLE pid_result
 )
 
-if(NOT pip_result EQUAL 0)
+if(NOT pid_result EQUAL 0)
   message(FATAL_ERROR "Failed to install simple-pid via pip3. Please check your Python environment.")
+endif()
+
+execute_process(
+  COMMAND ${PIP_EXECUTABLE} install pyproj
+  RESULT_VARIABLE pyproj_result
+)
+
+if(NOT pyproj_result EQUAL 0)
+  message(FATAL_ERROR "Failed to install pyproj via pip3. Please check your Python environment.")
 endif()
 
 # Install Python scripts and other files
@@ -41,6 +50,7 @@ install(
 install(
   PROGRAMS
     scripts/auv_gps_navigation_node.py
+    scripts/navigation_sim.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

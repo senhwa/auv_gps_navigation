@@ -12,6 +12,7 @@
 - ROS2 Humble version
 - Python 3.8 or later
 - `simple_pid` Python package (automatically installed via CMake)
+- sudo apt-get install ros-humble-tf-transformations
 
 ## Installation
 Clone and build the package using the following commands:
