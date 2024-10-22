@@ -4,14 +4,16 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import NavSatFix, Imu
 from geometry_msgs.msg import PoseStamped, Wrench
+from visualization_msgs.msg import Marker, MarkerArray
 from std_msgs.msg import Float32
 from tf2_ros import TransformBroadcaster
 import tf_transformations
-from pyproj import Proj, transform
+from pyproj import Proj, Transformer, CRS
 from geometry_msgs.msg import TransformStamped
 import math
 import time
 from simple_pid import PID
+
 
 class AUVNavigationNode(Node):
     def __init__(self):
@@ -21,7 +23,7 @@ class AUVNavigationNode(Node):
         self.declare_parameter('waypoint_threshold', 1.0)  # Meters
         self.declare_parameter('angle_threshold', 10.0)  # Degrees
         self.declare_parameter('gps_timeout', 5.0)  # Seconds
-        self.declare_parameter('x_output_limit', 1.0)  # Maximum limit for x control effort
+        self.declare_parameter('x_output_limit', 100.0)  # Maximum limit for x control effort
 
         # Load parameters with default values
         self.waypoint_threshold = self.get_parameter('waypoint_threshold').get_parameter_value().double_value
@@ -37,13 +39,18 @@ class AUVNavigationNode(Node):
         # Publishers for AUV pose and wrench commands
         self.pose_publisher = self.create_publisher(PoseStamped, '/auv/pose', 10)
         self.wrench_publisher = self.create_publisher(Wrench, '/auv/wrench', 10)
+        self.waypoint_marker_publisher = self.create_publisher(MarkerArray, '/waypoint_markers', 10)
 
         # Transform broadcaster for publishing AUV pose as a TF transform
         self.tf_broadcaster = TransformBroadcaster(self)
 
-        # Coordinate transformation using pyproj (WGS84 to target EPSG:6676)
-        self.proj_wgs84 = Proj('epsg:4326')
-        self.proj_target = Proj('epsg:6676')
+        # Coordinate transformer
+        self.proj_wgs84 = CRS("EPSG:4326")
+        self.proj_target = CRS("EPSG:6676")
+        self.proj_transformer_epsg2wgs = Transformer.from_crs(self.proj_target,self.proj_wgs84, always_xy=True)
+        self.proj_transformer_wgs2epsg = Transformer.from_crs(self.proj_wgs84,self.proj_target, always_xy=True)
+        self.proj_ref_latlon = [37.7748, -122.4195]
+        self.proj_ref_xy = self.proj_transformer_wgs2epsg.transform(self.proj_ref_latlon[1], self.proj_ref_latlon[0])
 
         # Variables for storing current sensor data and state
         self.current_lat = None
@@ -52,8 +59,8 @@ class AUVNavigationNode(Node):
         self.current_orientation = None
         self.waypoints = [
             (37.7749, -122.4194),  # Example waypoint 1
-            (37.7750, -122.4180),  # Example waypoint 2
-            (37.7751, -122.4170)   # Example waypoint 3
+            (37.7750, -122.4193),  # Example waypoint 2
+            (37.7751, -122.4194)   # Example waypoint 3
         ]
         self.current_waypoint_index = 0
         self.last_gps_time = time.time()
@@ -61,15 +68,15 @@ class AUVNavigationNode(Node):
         self.gps_lost = False
 
         # PID Controllers for x propulsion and yaw control
-        self.pid_x = PID(1.0, 0.1, 0.05, setpoint=0)
+        self.pid_x = PID(20.0, 0.0, 0.00, setpoint=0)
         self.pid_x.output_limits = (-self.x_output_limit, self.x_output_limit)  # Limit x control effort
-        self.pid_yaw = PID(1.0, 0.1, 0.05, setpoint=0)
-        self.pid_yaw.output_limits = (-1.0, 1.0)  # Limit yaw control effort
+        self.pid_yaw = PID(50.0, 0.0, 0.00, setpoint=0)
+        self.pid_yaw.output_limits = (-50.0, 50.0)  # Limit yaw control effort
 
         # Timer for logging status information
-        self.create_timer(2.0, self.log_status_callback)  # Log status every 2 seconds
+        self.create_timer(5.0, self.log_status_callback)  # Log status every 2 seconds
 
-    def gps_callback(self, msg):
+    def gps_callback(self, msg: NavSatFix):
         # Update current GPS coordinates and reset GPS timeout
         self.current_lat = msg.latitude
         self.current_lon = msg.longitude
@@ -80,11 +87,11 @@ class AUVNavigationNode(Node):
             self.get_logger().info('GPS signal restored. Resuming operations.')
             self.gps_lost = False
 
-    def imu_callback(self, msg):
+    def imu_callback(self, msg: Imu):
         # Update current orientation from IMU data
         self.current_orientation = msg.orientation
 
-    def depth_callback(self, msg):
+    def depth_callback(self, msg: Float32):
         # Update current depth from depth sensor data
         self.current_depth = msg.data
 
@@ -94,7 +101,8 @@ class AUVNavigationNode(Node):
             return
 
         # Convert GPS coordinates to target UTM coordinate system (EPSG:6676)
-        x, y = transform(self.proj_wgs84, self.proj_target, self.current_lon, self.current_lat)
+        x = self.proj_transformer_wgs2epsg.transform(self.current_lon, self.current_lat)[0] - self.proj_ref_xy[0]
+        y = self.proj_transformer_wgs2epsg.transform(self.current_lon, self.current_lat)[1] - self.proj_ref_xy[1]
         z = self.current_depth
 
         # Create PoseStamped message for AUV position and orientation
@@ -138,12 +146,13 @@ class AUVNavigationNode(Node):
         target_lat, target_lon = self.waypoints[self.current_waypoint_index]
 
         # Convert target waypoint GPS to UTM coordinates
-        target_x, target_y = transform(self.proj_wgs84, self.proj_target, target_lon, target_lat)
-        current_x, current_y = transform(self.proj_wgs84, self.proj_target, self.current_lon, self.current_lat)
+        target_x, target_y = self.proj_transformer_wgs2epsg.transform(target_lon, target_lat)
+        current_x, current_y = self.proj_transformer_wgs2epsg.transform(self.current_lon, self.current_lat)
 
         # Calculate relative position to target waypoint
         delta_x = target_x - current_x
         delta_y = target_y - current_y
+        target_dist = math.sqrt((target_x - current_x)**2+(target_y - current_y)**2)
         target_angle = math.atan2(delta_y, delta_x)  # Calculate angle to the target waypoint
 
         # Extract current yaw from orientation quaternion
@@ -158,26 +167,24 @@ class AUVNavigationNode(Node):
         angle_diff = self.calculate_angle_difference(target_angle, current_yaw)
 
         # Check if the AUV has reached the waypoint within the specified threshold
-        if self.is_waypoint_reached(delta_x, delta_y):
+        if self.is_waypoint_reached(target_dist, angle_diff):
             self.move_to_next_waypoint()  # Move to the next waypoint
             return
 
         # Create Wrench message using PID controllers for x propulsion and yaw control
-        wrench_msg = self.create_pid_wrench_message(delta_x, angle_diff)
+        wrench_msg = self.create_pid_wrench_message(target_dist, angle_diff)
 
         # Publish wrench to '/auv/wrench'
         self.wrench_publisher.publish(wrench_msg)
 
     def calculate_angle_difference(self, target_angle, current_yaw):
         # Calculate difference between target angle and current yaw, normalize to [-pi, pi]
-        angle_diff = target_angle - current_yaw
+        angle_diff = -(target_angle - current_yaw)
         return (angle_diff + math.pi) % (2 * math.pi) - math.pi
 
-    def is_waypoint_reached(self, delta_x, delta_y):
-        # Calculate distance to the waypoint
-        distance_to_waypoint = math.sqrt(delta_x ** 2 + delta_y ** 2)
+    def is_waypoint_reached(self, distance, angle_diff):
         # Return True if distance is within the threshold
-        return distance_to_waypoint < self.waypoint_threshold
+        return distance < self.waypoint_threshold
 
     def move_to_next_waypoint(self):
         # Move to the next waypoint in the list
@@ -194,7 +201,7 @@ class AUVNavigationNode(Node):
 
         # Apply force in x direction using PID for x propulsion
         if abs(angle_diff) <= self.angle_threshold:
-            x_control_effort = self.pid_x(delta_x)
+            x_control_effort = self.pid_x(-delta_x)
             wrench_msg.force.x = x_control_effort
         else:
             # If the angle difference is too large, stop forward motion
@@ -225,6 +232,32 @@ class AUVNavigationNode(Node):
         # Periodically publish pose and wrench commands
         self.publish_pose()
         self.publish_wrench()
+        self.pub_waypoint_marker()
+        
+    def pub_waypoint_marker(self):
+        # Publish waypoint markers for visualization
+        marker_array = MarkerArray()
+        for i, (lat, lon) in enumerate(self.waypoints):
+            marker = Marker()
+            marker.header.frame_id = 'map'
+            marker.header.stamp = self.get_clock().now().to_msg()
+            marker.id = i
+            marker.type = Marker.SPHERE
+            marker.action = Marker.ADD
+            marker.pose.position.x, marker.pose.position.y = self.proj_transformer_wgs2epsg.transform(lon, lat)
+            marker.pose.position.x -= self.proj_ref_xy[0]
+            marker.pose.position.y -= self.proj_ref_xy[1]
+            marker.pose.position.z = 0.0
+            marker.pose.orientation.w = 1.0
+            marker.scale.x = 1.0
+            marker.scale.y = 1.0
+            marker.scale.z = 1.0
+            marker.color.a = 1.0
+            marker.color.r = 0.0
+            marker.color.g = 1.0
+            marker.color.b = 0.0
+            marker_array.markers.append(marker)
+        self.waypoint_marker_publisher.publish(marker_array)
 
 
 def main(args=None):

@@ -2,12 +2,13 @@
 
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Wrench, Twist
+from geometry_msgs.msg import Wrench, Twist, PoseStamped, TransformStamped
 from sensor_msgs.msg import NavSatFix, Imu
 from std_msgs.msg import Float32
 from pyproj import Proj, Transformer, CRS
 import numpy as np
 import tf_transformations
+from tf2_ros import TransformBroadcaster
 
 class AUVSimulationNode(Node):
     def __init__(self):
@@ -19,12 +20,22 @@ class AUVSimulationNode(Node):
         self.drag_coefficient_y = 50.0  # Hydrodynamic drag coefficient in y-axis
         self.drag_coefficient_z = 50.0  # Hydrodynamic drag coefficient in z-axis
         self.buoyancy = 510.0  # Buoyancy in Newton
-        self.inertia_z = 200.0  # Rotational inertia around z-axis
+        self.inertia_z = 20.0  # Rotational inertia around z-axis
         self.angular_drag_coefficient = 20.0  # Angular resistance coefficient  # Angular resistance coefficient
 
+        # Coordinate transformer
+        self.proj_wgs84 = CRS("EPSG:4326")
+        self.proj_target = CRS("EPSG:6676")
+        self.proj_transformer_epsg2wgs = Transformer.from_crs(self.proj_target,self.proj_wgs84, always_xy=True)
+        self.proj_transformer_wgs2epsg = Transformer.from_crs(self.proj_wgs84,self.proj_target, always_xy=True)
+        self.proj_ref_latlon = [37.7748, -122.4195]
+        self.proj_ref_xy = self.proj_transformer_wgs2epsg.transform(self.proj_ref_latlon[1], self.proj_ref_latlon[0])
+
         # Initial states
-        self.x = 0.0
-        self.y = 0.0
+        self.initial_lat = 37.7749
+        self.initial_lon = -122.4194
+        self.x = self.proj_transformer_wgs2epsg.transform(self.initial_lon, self.initial_lat)[0] - self.proj_ref_xy[0]
+        self.y = self.proj_transformer_wgs2epsg.transform(self.initial_lon, self.initial_lat)[1] - self.proj_ref_xy[1]       
         self.z = 0.0
         self.yaw = 0.0
         self.fx = 0.0
@@ -36,11 +47,6 @@ class AUVSimulationNode(Node):
         self.vz = 0.0
         self.yaw_rate = 0.0
 
-        # Coordinate transformer
-        self.proj_wgs84 = CRS("WGS84")
-        self.proj_target = CRS("EPSG:6676")
-        self.proj_transformer = Transformer.from_crs(self.proj_target,self.proj_wgs84)
-
         # Subscribers
         self.subscription_wrench = self.create_subscription(Wrench, '/auv/wrench', self.wrench_callback, 10)
 
@@ -49,6 +55,10 @@ class AUVSimulationNode(Node):
         self.depth_publisher = self.create_publisher(Float32, '/sensing/depth/data', 10)
         self.imu_publisher = self.create_publisher(Imu, '/sensing/imu/data', 10)
         self.velocity_publisher = self.create_publisher(Twist, '/simulation/velocity', 10)
+        self.position_publisher = self.create_publisher(PoseStamped, '/simulation/position', 10)
+
+        # TF2 broadcaster
+        self.tf_broadcaster = TransformBroadcaster(self)
 
         # Timer for updating the simulation
         self.create_timer(0.1, self.update_simulation)  # 10 Hz update rate
@@ -86,7 +96,7 @@ class AUVSimulationNode(Node):
         self.yaw += self.yaw_rate * dt
 
         # Publish updated GPS position
-        lon, lat = self.proj_transformer.transform(self.x, self.y)
+        lon, lat = self.proj_transformer_epsg2wgs.transform(self.x + self.proj_ref_xy[0], self.y + self.proj_ref_xy[1])
         gps_msg = NavSatFix()
         gps_msg.latitude = lat
         gps_msg.longitude = lon
@@ -113,6 +123,27 @@ class AUVSimulationNode(Node):
         velocity_msg.linear.z = self.vz
         velocity_msg.angular.z = self.yaw_rate
         self.velocity_publisher.publish(velocity_msg)
+        
+        # Publish position with stamped message
+        position_msg = PoseStamped()
+        position_msg.header.stamp = self.get_clock().now().to_msg()
+        position_msg.pose.position.x = self.x
+        position_msg.pose.position.y = self.y
+        position_msg.pose.position.z = self.z
+        position_msg.pose.orientation = self.get_orientation_quaternion()
+        self.position_publisher.publish(position_msg)
+        
+        # Publish transform for TF2 broadcasting
+        t = TransformStamped()
+        t.header.stamp = self.get_clock().now().to_msg()
+        t.header.frame_id = 'map'
+        t.child_frame_id = 'base_link_simulation'
+        t.transform.translation.x = self.x
+        t.transform.translation.y = self.y
+        t.transform.translation.z = self.z
+        t.transform.rotation = self.get_orientation_quaternion()
+
+        self.tf_broadcaster.sendTransform(t)
 
     def get_orientation_quaternion(self):
         # Calculate quaternion from yaw angle
@@ -124,14 +155,12 @@ class AUVSimulationNode(Node):
         imu_orientation.w = q[3]
         return imu_orientation
 
-
 def main(args=None):
     rclpy.init(args=args)
     node = AUVSimulationNode()
     rclpy.spin(node)
     node.destroy_node()
     rclpy.shutdown()
-
 
 if __name__ == '__main__':
     main()
