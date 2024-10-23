@@ -44,6 +44,9 @@ install(
   DIRECTORY
     launch
     config
+    rviz
+    urdf
+    meshes
   DESTINATION share/${PROJECT_NAME}
 )
 

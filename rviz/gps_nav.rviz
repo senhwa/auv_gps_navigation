@@ -9,8 +9,7 @@ Panels:
         - /Grid1
         - /TF1
         - /MarkerArray1
-        - /MarkerArray1/Topic1
-      Splitter Ratio: 0.6970587968826294
+      Splitter Ratio: 0.5
     Tree Height: 684
   - Class: rviz_common/Selection
     Name: Selection
@@ -48,7 +47,7 @@ Visualization Manager:
         Y: 0
         Z: 0
       Plane: XY
-      Plane Cell Count: 10
+      Plane Cell Count: 20
       Reference Frame: <Fixed Frame>
       Value: true
     - Class: rviz_default_plugins/TF
@@ -62,11 +61,11 @@ Visualization Manager:
           Value: true
         map:
           Value: true
-      Marker Scale: 10
+      Marker Scale: 20
       Name: TF
       Show Arrows: true
       Show Axes: true
-      Show Names: true
+      Show Names: false
       Tree:
         map:
           base_link:
@@ -133,25 +132,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 53.49191665649414
+      Distance: 118.23150634765625
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: -17.987239837646484
-        Y: 11.835258483886719
-        Z: 5.518892765045166
+        X: -33.718143463134766
+        Y: 9.828595161437988
+        Z: 4.115957260131836
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.0953975915908813
+      Pitch: 0.7753980755805969
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 1.1003975868225098
+      Yaw: 0.9353978633880615
     Saved: ~
 Window Geometry:
   Displays:
@@ -169,5 +168,5 @@ Window Geometry:
   Views:
     collapsed: false
   Width: 1908
-  X: -32
-  Y: -32
+  X: 6
+  Y: 27
