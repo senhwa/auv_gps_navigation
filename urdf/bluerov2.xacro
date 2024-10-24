@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<robot name="bluerov2">
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.571 0 1.571"/>
+      <geometry>
+        <mesh filename="package://auv_gps_navigation/meshes/BLUEROV2-R4-PUBLIC_v1.stl" scale="0.01 0.01 0.01"/>
+      </geometry>
+      <material name="grayblue">
+        <color rgba="0.3 0.3 1.0 1.0"/>
+      </material>
+    </visual>
+  </link>
+</robot>
